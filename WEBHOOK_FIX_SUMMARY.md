@@ -37,10 +37,11 @@ if not application.initialized:
 # Process the update directly (application should already be initialized)
 ```
 
-### 2. Added Proper Application Initialization
-- Created an `ensure_application_initialized()` function to handle one-time initialization
-- Added a global flag `_application_initialized` to track initialization status
-- Modified webhook handler to ensure initialization before processing updates
+### 2. Added Thread-Safe Application Initialization
+- Created thread-safe initialization functions with proper locking
+- Added a global flag `_application_initialized` with `threading.Lock()` for thread safety
+- Implemented double-checked locking pattern to prevent race conditions
+- Modified webhook handler to ensure safe initialization before processing updates
 
 ### 3. Enhanced Startup Process
 - Updated `setup_webhook()` function to initialize the application during startup
@@ -50,24 +51,34 @@ if not application.initialized:
 
 ### File: `app/webhook.py`
 
-1. **Added initialization tracking:**
+1. **Added thread-safe initialization:**
 ```python
+import threading
 _application_initialized = False
+_initialization_lock = threading.Lock()
 
-async def ensure_application_initialized():
+def initialize_application_sync():
     global _application_initialized
+    # Double-checked locking pattern for thread safety
     if not _application_initialized:
-        application = bot_instance.get_application()
-        await application.initialize()
-        _application_initialized = True
-        logger.info("Bot application initialized successfully")
+        with _initialization_lock:
+            if not _application_initialized:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    application = bot_instance.get_application()
+                    loop.run_until_complete(application.initialize())
+                    _application_initialized = True
+                    logger.info("Bot application initialized successfully")
+                finally:
+                    loop.close()
 ```
 
 2. **Updated webhook handler:**
 ```python
 try:
-    # Ensure application is initialized
-    loop.run_until_complete(ensure_application_initialized())
+    # Ensure application is ready to handle requests (thread-safe)
+    ensure_application_ready()
     
     # Get the application and process the update
     application = bot_instance.get_application()
@@ -75,15 +86,13 @@ try:
     logger.info("Update processed successfully")
 ```
 
-3. **Enhanced startup webhook setup:**
+3. **Enhanced startup with thread safety:**
 ```python
-# Initialize the bot application during startup
-loop = asyncio.new_event_loop()
-asyncio.set_event_loop(loop)
+# For production servers like Gunicorn, initialize immediately
 try:
-    loop.run_until_complete(ensure_application_initialized())
-finally:
-    loop.close()
+    initialize_application_sync()
+except Exception as e:
+    logger.error(f"Failed to initialize application: {str(e)}")
 ```
 
 ## Result
@@ -92,7 +101,9 @@ After implementing these changes:
 - ✅ The `/start` command will now work properly
 - ✅ All bot commands and callbacks will function correctly
 - ✅ The application initializes once during startup for better performance
+- ✅ Thread-safe initialization prevents race conditions in multi-threaded environments
 - ✅ Error handling is maintained for robust operation
+- ✅ Production-ready for WSGI servers like Gunicorn
 
 ## Testing
 
@@ -102,11 +113,16 @@ To verify the fix works:
 3. You should see the welcome message with the subscription management interface
 4. Check logs for successful initialization message: "Bot application initialized successfully"
 
+## Important Notes
+
+⚠️ **Thread Safety**: The solution includes proper thread synchronization using `threading.Lock()` and double-checked locking pattern to prevent race conditions in Flask's multi-threaded environment.
+
 ## Recommendations
 
 1. **Consider upgrading**: While this fix resolves the immediate issue, consider updating to a more recent version of `python-telegram-bot` (v21 or v22) for better features and security
 2. **Monitor logs**: Keep an eye on the application logs to ensure smooth operation
-3. **Test all features**: Verify that subscription management, admin commands, and other bot features work as expected
+3. **Load testing**: Test with multiple concurrent requests to verify thread safety
+4. **Test all features**: Verify that subscription management, admin commands, and other bot features work as expected
 
 ## Files Modified
 - `app/webhook.py` - Main webhook handling logic

@@ -20,17 +20,40 @@ init_db()
 # Create Bot instance for webhook processing
 bot = Bot(token=Config.TELEGRAM_BOT_TOKEN)
 
-# Application initialization flag
+# Thread-safe application initialization
+import threading
+import asyncio
 _application_initialized = False
+_initialization_lock = threading.Lock()
 
-async def ensure_application_initialized():
-    """Ensure the bot application is initialized"""
+def initialize_application_sync():
+    """Initialize the bot application synchronously (thread-safe)"""
     global _application_initialized
+    
+    # Double-checked locking pattern for thread safety
     if not _application_initialized:
-        application = bot_instance.get_application()
-        await application.initialize()
-        _application_initialized = True
-        logger.info("Bot application initialized successfully")
+        with _initialization_lock:
+            # Check again inside the lock to avoid race condition
+            if not _application_initialized:
+                try:
+                    # Create a new event loop for initialization
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        application = bot_instance.get_application()
+                        loop.run_until_complete(application.initialize())
+                        _application_initialized = True
+                        logger.info("Bot application initialized successfully")
+                    finally:
+                        loop.close()
+                except Exception as e:
+                    logger.error(f"Failed to initialize bot application: {str(e)}")
+                    raise
+
+def ensure_application_ready():
+    """Ensure the bot application is ready to handle requests"""
+    if not _application_initialized:
+        initialize_application_sync()
 
 @app.route('/', methods=['GET'])
 def health_check():
@@ -63,8 +86,8 @@ def telegram_webhook():
         asyncio.set_event_loop(loop)
         
         try:
-            # Ensure application is initialized
-            loop.run_until_complete(ensure_application_initialized())
+            # Ensure application is ready to handle requests
+            ensure_application_ready()
             
             # Get the application and process the update
             application = bot_instance.get_application()
@@ -165,12 +188,7 @@ def setup_webhook():
         time.sleep(2)
         
         # Initialize the bot application
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            loop.run_until_complete(ensure_application_initialized())
-        finally:
-            loop.close()
+        initialize_application_sync()
         
         webhook_url = f"{Config.WEBHOOK_URL}{Config.WEBHOOK_PATH}"
         telegram_api_url = f"https://api.telegram.org/bot{Config.TELEGRAM_BOT_TOKEN}/setWebhook"
@@ -191,6 +209,22 @@ def setup_webhook():
             
     except Exception as e:
         logger.error(f"❌ Error setting up webhook: {str(e)}")
+
+# Initialize application on Flask startup
+def create_app():
+    """Application factory pattern for proper initialization"""
+    try:
+        initialize_application_sync()
+    except Exception as e:
+        logger.error(f"Failed to initialize application on startup: {str(e)}")
+        # Don't raise here to allow Flask to start, but log the error
+    return app
+
+# For production servers like Gunicorn, initialize immediately
+try:
+    initialize_application_sync()
+except Exception as e:
+    logger.error(f"Failed to initialize application: {str(e)}")
 
 if __name__ == '__main__':
     # Setup webhook when running directly
