@@ -4,9 +4,9 @@ services:
     name: subscription-savor-bot
     env: python
     region: oregon
-    plan: starter
+    plan: free
     buildCommand: "pip install -r requirements.txt"
-    startCommand: "python main.py"
+    startCommand: "gunicorn --bind 0.0.0.0:$PORT --workers 1 --timeout 120 app.webhook:app"
     envVars:
       - key: PYTHON_VERSION
         value: 3.9.18
@@ -35,7 +35,7 @@ services:
     name: subscription-savor-worker
     env: python
     region: oregon
-    plan: starter
+    plan: free
     buildCommand: "pip install -r requirements.txt"
     startCommand: "python worker.py"
     envVars:
@@ -59,11 +59,13 @@ services:
       - key: SECRET_KEY
         generateValue: true
 
-  # Redis service
+  # Redis service - Fixed with IP allow list
   - type: redis
     name: subscription-savor-redis
-    plan: starter
+    plan: free
     region: oregon
+    ipAllowList: []  # Only allow internal connections
+    maxmemoryPolicy: noeviction  # Recommended for job queues
 
 databases:
   - name: subscription-savor-db
