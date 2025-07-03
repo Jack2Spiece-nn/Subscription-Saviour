@@ -34,7 +34,7 @@ def telegram_webhook():
             return Response(status=200)
         
         # Create Update object
-        update = Update.de_json(update_data, bot_instance.config.TELEGRAM_BOT_TOKEN)
+        update = Update.de_json(update_data, Config.TELEGRAM_BOT_TOKEN)
         
         if not update:
             logger.warning("Failed to parse update")

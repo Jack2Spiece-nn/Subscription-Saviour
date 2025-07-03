@@ -15,15 +15,14 @@ logger = logging.getLogger(__name__)
 
 class SubscriptionBot:
     def __init__(self):
-        self.config = Config()
-        self.config.validate()
+        Config.validate()
         
         # User session storage for multi-step operations
         self.user_sessions = {}
     
     def get_application(self) -> Application:
         """Create and configure the bot application"""
-        application = Application.builder().token(self.config.TELEGRAM_BOT_TOKEN).build()
+        application = Application.builder().token(Config.TELEGRAM_BOT_TOKEN).build()
         
         # Command handlers
         application.add_handler(CommandHandler("start", self.start_command))

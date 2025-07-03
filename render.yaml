@@ -66,7 +66,6 @@ databases:
     user: subscription_user
     region: oregon
 
-services:
   - type: redis
     name: subscription-savor-redis
     plan: starter
