@@ -53,6 +53,11 @@ def telegram_webhook():
         try:
             # Get the application and process the update
             application = bot_instance.get_application()
+            
+            # Initialize application if not already initialized
+            if not application.initialized:
+                loop.run_until_complete(application.initialize())
+            
             loop.run_until_complete(application.process_update(update))
             logger.info("Update processed successfully")
         except Exception as e:

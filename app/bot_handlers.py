@@ -19,38 +19,45 @@ class SubscriptionBot:
         
         # User session storage for multi-step operations
         self.user_sessions = {}
+        
+        # Initialize the application once
+        self._application = None
+        self._initialize_application()
     
-    def get_application(self) -> Application:
-        """Create and configure the bot application"""
-        application = Application.builder().token(Config.TELEGRAM_BOT_TOKEN).build()
+    def _initialize_application(self):
+        """Initialize the bot application with handlers"""
+        # Create the application
+        self._application = Application.builder().token(Config.TELEGRAM_BOT_TOKEN).build()
         
         # Command handlers
-        application.add_handler(CommandHandler("start", self.start_command))
-        application.add_handler(CommandHandler("help", self.help_command))
-        application.add_handler(CommandHandler("list", self.list_subscriptions))
-        application.add_handler(CommandHandler("add", self.add_subscription_flow))
-        application.add_handler(CommandHandler("stats", self.stats_command))
+        self._application.add_handler(CommandHandler("start", self.start_command))
+        self._application.add_handler(CommandHandler("help", self.help_command))
+        self._application.add_handler(CommandHandler("list", self.list_subscriptions))
+        self._application.add_handler(CommandHandler("add", self.add_subscription_flow))
+        self._application.add_handler(CommandHandler("stats", self.stats_command))
         
         # Admin commands
-        application.add_handler(CommandHandler("admin", self.admin_panel))
-        application.add_handler(CommandHandler("admin_stats", self.admin_stats))
-        application.add_handler(CommandHandler("broadcast", self.admin_broadcast))
-        application.add_handler(CommandHandler("grant_pro", self.admin_grant_pro))
+        self._application.add_handler(CommandHandler("admin", self.admin_panel))
+        self._application.add_handler(CommandHandler("admin_stats", self.admin_stats))
+        self._application.add_handler(CommandHandler("broadcast", self.admin_broadcast))
+        self._application.add_handler(CommandHandler("grant_pro", self.admin_grant_pro))
         
         # Message handlers (for persistent keyboard)
-        application.add_handler(MessageHandler(filters.Regex("^📝 Add Subscription$"), self.add_subscription_flow))
-        application.add_handler(MessageHandler(filters.Regex("^📋 My Subscriptions$"), self.list_subscriptions))
-        application.add_handler(MessageHandler(filters.Regex("^⭐ Upgrade to Pro$"), self.upgrade_flow))
-        application.add_handler(MessageHandler(filters.Regex("^📊 My Stats$"), self.stats_command))
-        application.add_handler(MessageHandler(filters.Regex("^⚙️ Settings$"), self.settings_command))
+        self._application.add_handler(MessageHandler(filters.Regex("^📝 Add Subscription$"), self.add_subscription_flow))
+        self._application.add_handler(MessageHandler(filters.Regex("^📋 My Subscriptions$"), self.list_subscriptions))
+        self._application.add_handler(MessageHandler(filters.Regex("^⭐ Upgrade to Pro$"), self.upgrade_flow))
+        self._application.add_handler(MessageHandler(filters.Regex("^📊 My Stats$"), self.stats_command))
+        self._application.add_handler(MessageHandler(filters.Regex("^⚙️ Settings$"), self.settings_command))
         
         # Callback query handler for inline keyboards
-        application.add_handler(CallbackQueryHandler(self.handle_callback))
+        self._application.add_handler(CallbackQueryHandler(self.handle_callback))
         
         # Text message handler for multi-step flows
-        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text_input))
-        
-        return application
+        self._application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text_input))
+    
+    def get_application(self) -> Application:
+        """Get the initialized bot application"""
+        return self._application
     
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /start command"""
@@ -299,6 +306,8 @@ Ready to unlock the full potential?
             await self._handle_subscription_type(query, context)
         elif data.startswith("reminder_"):
             await self._handle_reminder_setting(query, context)
+        elif data == "skip_cost":
+            await self._handle_skip_cost(query, context)
         elif data == "cancel_add" or data == "cancel_action":
             await self._handle_cancel(query, context)
         # Add more callback handlers as needed
@@ -373,6 +382,26 @@ Ready to unlock the full potential?
             "To upgrade to Pro, please contact our support team.\n\n"
             "🔜 Payment integration coming soon!\n\n"
             "For now, admin can manually upgrade accounts."
+        )
+    
+    async def _handle_skip_cost(self, query, context):
+        """Handle skipping cost input"""
+        user_id = query.from_user.id
+        
+        if user_id not in self.user_sessions:
+            await query.edit_message_text("❌ Session expired. Please start over.")
+            return
+        
+        # Skip cost and move to end date
+        self.user_sessions[user_id]["cost"] = None
+        self.user_sessions[user_id]["step"] = "awaiting_end_date"
+        
+        await query.edit_message_text(
+            f"📅 **End Date**\n\n"
+            f"When does this subscription expire?\n"
+            f"Please enter the date in format: YYYY-MM-DD\n"
+            f"(e.g., 2024-02-15)",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_add")]])
         )
     
     async def _handle_cancel(self, query, context):
