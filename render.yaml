@@ -64,6 +64,9 @@ services:
     name: subscription-savor-redis
     plan: starter
     region: oregon
+    ipAllowList:
+      - source: 0.0.0.0/0
+        description: Allow access from all Render services
 
 databases:
   - name: subscription-savor-db
