@@ -21,6 +21,16 @@ init_db()
 # Thread-safe application initialization
 _application_initialized = False
 _initialization_lock = threading.Lock()
+# New: global shared event loop infrastructure
+_event_loop = None  # type: asyncio.AbstractEventLoop | None
+_loop_thread = None  # type: threading.Thread | None
+
+# Helper to start the event loop in a dedicated background thread
+
+def _start_event_loop(loop: asyncio.AbstractEventLoop):
+    """Run *loop* forever inside its own OS thread."""
+    asyncio.set_event_loop(loop)
+    loop.run_forever()
 
 def initialize_application_sync():
     """Initialize the bot application synchronously (thread-safe)"""
@@ -32,16 +42,24 @@ def initialize_application_sync():
             # Check again inside the lock to avoid race condition
             if not _application_initialized:
                 try:
-                    # Create a new event loop for initialization
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    try:
-                        application = bot_instance.get_application()
-                        loop.run_until_complete(application.initialize())
-                        _application_initialized = True
-                        logger.info("Bot application initialized successfully")
-                    finally:
-                        loop.close()
+                    # New: create (or reuse) the global event loop running in a background thread
+                    global _event_loop, _loop_thread
+                    if _event_loop is None:
+                        _event_loop = asyncio.new_event_loop()
+                        _loop_thread = threading.Thread(target=_start_event_loop, args=(_event_loop,), daemon=True)
+                        _loop_thread.start()
+
+                    # At this point, _event_loop is guaranteed to be initialized
+                    assert _event_loop is not None
+
+                    application = bot_instance.get_application()
+
+                    # Run the asynchronous initialization in the background event loop
+                    future = asyncio.run_coroutine_threadsafe(application.initialize(), _event_loop)
+                    future.result()  # Wait until initialization completes
+
+                    _application_initialized = True
+                    logger.info("Bot application initialized successfully")
                 except Exception as e:
                     logger.error(f"Failed to initialize bot application: {str(e)}")
                     raise
@@ -50,6 +68,9 @@ def ensure_application_ready():
     """Ensure the bot application is ready to handle requests"""
     if not _application_initialized:
         initialize_application_sync()
+
+    # Static type safety – _event_loop is set by ensure_application_ready
+    assert _event_loop is not None
 
 @app.route('/', methods=['GET'])
 def health_check():
@@ -78,21 +99,16 @@ def telegram_webhook():
         
         logger.info(f"Processing update for user: {update.effective_user.id if update.effective_user else 'unknown'}")
         
-        # Process update asynchronously
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
+        # Ensure the application and shared event loop are ready
+        ensure_application_ready()
+
         try:
-            # Ensure application is ready to handle requests
-            ensure_application_ready()
-            
-            # Process the update
-            loop.run_until_complete(application.process_update(update))
+            # Submit processing of the update to the shared event loop and wait for completion
+            future = asyncio.run_coroutine_threadsafe(application.process_update(update), _event_loop)
+            future.result()
             logger.info("Update processed successfully")
         except Exception as e:
             logger.error(f"Error processing update: {str(e)}", exc_info=True)
-        finally:
-            loop.close()
         
         return Response(status=200)
         
