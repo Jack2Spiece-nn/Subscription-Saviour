@@ -2,10 +2,11 @@ import logging
 import asyncio
 import threading
 from flask import Flask, request, Response
-from telegram import Update, Bot
+from telegram import Update
 from app.config import Config
 from app.bot_handlers import bot_instance
 from app.database import init_db
+from typing import Optional
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -22,8 +23,8 @@ init_db()
 _application_initialized = False
 _initialization_lock = threading.Lock()
 # New: global shared event loop infrastructure
-_event_loop = None  # type: asyncio.AbstractEventLoop | None
-_loop_thread = None  # type: threading.Thread | None
+_event_loop: Optional[asyncio.AbstractEventLoop] = None
+_loop_thread: Optional[threading.Thread] = None
 
 # Helper to start the event loop in a dedicated background thread
 
@@ -102,9 +103,13 @@ def telegram_webhook():
         # Ensure the application and shared event loop are ready
         ensure_application_ready()
 
+        # Type-narrow the global _event_loop for static analysers
+        loop = _event_loop
+        assert loop is not None  # noqa: S101 – narrow Optional to concrete loop
+
         try:
             # Submit processing of the update to the shared event loop and wait for completion
-            future = asyncio.run_coroutine_threadsafe(application.process_update(update), _event_loop)
+            future = asyncio.run_coroutine_threadsafe(application.process_update(update), loop)
             future.result()
             logger.info("Update processed successfully")
         except Exception as e:
