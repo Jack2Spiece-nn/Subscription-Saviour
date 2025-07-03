@@ -1,5 +1,6 @@
 import logging
 import asyncio
+import threading
 from flask import Flask, request, Response
 from telegram import Update, Bot
 from app.config import Config
@@ -17,12 +18,7 @@ app.config['SECRET_KEY'] = Config.SECRET_KEY
 # Initialize database
 init_db()
 
-# Create Bot instance for webhook processing
-bot = Bot(token=Config.TELEGRAM_BOT_TOKEN)
-
 # Thread-safe application initialization
-import threading
-import asyncio
 _application_initialized = False
 _initialization_lock = threading.Lock()
 
@@ -66,14 +62,15 @@ def telegram_webhook():
     try:
         # Get update from request
         update_data = request.get_json()
-        logger.info(f"Received webhook update: {update_data}")
+        logger.info("Received webhook update")
         
         if not update_data:
             logger.warning("Received empty update")
             return Response(status=200)
         
         # Create Update object
-        update = Update.de_json(update_data, bot)
+        application = bot_instance.get_application()
+        update = Update.de_json(update_data, application.bot)
         
         if not update:
             logger.warning("Failed to parse update")
@@ -89,8 +86,7 @@ def telegram_webhook():
             # Ensure application is ready to handle requests
             ensure_application_ready()
             
-            # Get the application and process the update
-            application = bot_instance.get_application()
+            # Process the update
             loop.run_until_complete(application.process_update(update))
             logger.info("Update processed successfully")
         except Exception as e:
