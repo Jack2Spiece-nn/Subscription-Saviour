@@ -59,14 +59,15 @@ services:
       - key: SECRET_KEY
         generateValue: true
 
+  # Redis service
+  - type: redis
+    name: subscription-savor-redis
+    plan: starter
+    region: oregon
+
 databases:
   - name: subscription-savor-db
     plan: starter
     databaseName: subscription_savor
     user: subscription_user
-    region: oregon
-
-  - type: redis
-    name: subscription-savor-redis
-    plan: starter
     region: oregon
