@@ -20,6 +20,18 @@ init_db()
 # Create Bot instance for webhook processing
 bot = Bot(token=Config.TELEGRAM_BOT_TOKEN)
 
+# Application initialization flag
+_application_initialized = False
+
+async def ensure_application_initialized():
+    """Ensure the bot application is initialized"""
+    global _application_initialized
+    if not _application_initialized:
+        application = bot_instance.get_application()
+        await application.initialize()
+        _application_initialized = True
+        logger.info("Bot application initialized successfully")
+
 @app.route('/', methods=['GET'])
 def health_check():
     """Health check endpoint"""
@@ -51,13 +63,11 @@ def telegram_webhook():
         asyncio.set_event_loop(loop)
         
         try:
+            # Ensure application is initialized
+            loop.run_until_complete(ensure_application_initialized())
+            
             # Get the application and process the update
             application = bot_instance.get_application()
-            
-            # Initialize application if not already initialized
-            if not application.initialized:
-                loop.run_until_complete(application.initialize())
-            
             loop.run_until_complete(application.process_update(update))
             logger.info("Update processed successfully")
         except Exception as e:
@@ -149,9 +159,18 @@ def setup_webhook():
     try:
         import requests
         import time
+        import asyncio
         
         # Wait a bit for the service to be ready
         time.sleep(2)
+        
+        # Initialize the bot application
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(ensure_application_initialized())
+        finally:
+            loop.close()
         
         webhook_url = f"{Config.WEBHOOK_URL}{Config.WEBHOOK_PATH}"
         telegram_api_url = f"https://api.telegram.org/bot{Config.TELEGRAM_BOT_TOKEN}/setWebhook"
