@@ -1,5 +1,6 @@
 import logging
 import asyncio
+import threading
 from flask import Flask, request, Response
 from telegram import Update, Bot
 from app.config import Config
@@ -17,8 +18,38 @@ app.config['SECRET_KEY'] = Config.SECRET_KEY
 # Initialize database
 init_db()
 
-# Create Bot instance for webhook processing
-bot = Bot(token=Config.TELEGRAM_BOT_TOKEN)
+# Thread-safe application initialization
+_application_initialized = False
+_initialization_lock = threading.Lock()
+
+def initialize_application_sync():
+    """Initialize the bot application synchronously (thread-safe)"""
+    global _application_initialized
+    
+    # Double-checked locking pattern for thread safety
+    if not _application_initialized:
+        with _initialization_lock:
+            # Check again inside the lock to avoid race condition
+            if not _application_initialized:
+                try:
+                    # Create a new event loop for initialization
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        application = bot_instance.get_application()
+                        loop.run_until_complete(application.initialize())
+                        _application_initialized = True
+                        logger.info("Bot application initialized successfully")
+                    finally:
+                        loop.close()
+                except Exception as e:
+                    logger.error(f"Failed to initialize bot application: {str(e)}")
+                    raise
+
+def ensure_application_ready():
+    """Ensure the bot application is ready to handle requests"""
+    if not _application_initialized:
+        initialize_application_sync()
 
 @app.route('/', methods=['GET'])
 def health_check():
@@ -31,14 +62,15 @@ def telegram_webhook():
     try:
         # Get update from request
         update_data = request.get_json()
-        logger.info(f"Received webhook update: {update_data}")
+        logger.info("Received webhook update")
         
         if not update_data:
             logger.warning("Received empty update")
             return Response(status=200)
         
         # Create Update object
-        update = Update.de_json(update_data, bot)
+        application = bot_instance.get_application()
+        update = Update.de_json(update_data, application.bot)
         
         if not update:
             logger.warning("Failed to parse update")
@@ -51,13 +83,10 @@ def telegram_webhook():
         asyncio.set_event_loop(loop)
         
         try:
-            # Get the application and process the update
-            application = bot_instance.get_application()
+            # Ensure application is ready to handle requests
+            ensure_application_ready()
             
-            # Initialize application if not already initialized
-            if not application.initialized:
-                loop.run_until_complete(application.initialize())
-            
+            # Process the update
             loop.run_until_complete(application.process_update(update))
             logger.info("Update processed successfully")
         except Exception as e:
@@ -149,9 +178,13 @@ def setup_webhook():
     try:
         import requests
         import time
+        import asyncio
         
         # Wait a bit for the service to be ready
         time.sleep(2)
+        
+        # Initialize the bot application
+        initialize_application_sync()
         
         webhook_url = f"{Config.WEBHOOK_URL}{Config.WEBHOOK_PATH}"
         telegram_api_url = f"https://api.telegram.org/bot{Config.TELEGRAM_BOT_TOKEN}/setWebhook"
@@ -172,6 +205,22 @@ def setup_webhook():
             
     except Exception as e:
         logger.error(f"❌ Error setting up webhook: {str(e)}")
+
+# Initialize application on Flask startup
+def create_app():
+    """Application factory pattern for proper initialization"""
+    try:
+        initialize_application_sync()
+    except Exception as e:
+        logger.error(f"Failed to initialize application on startup: {str(e)}")
+        # Don't raise here to allow Flask to start, but log the error
+    return app
+
+# For production servers like Gunicorn, initialize immediately
+try:
+    initialize_application_sync()
+except Exception as e:
+    logger.error(f"Failed to initialize application: {str(e)}")
 
 if __name__ == '__main__':
     # Setup webhook when running directly

@@ -7,7 +7,7 @@ class Config:
     # Telegram Bot Settings
     TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
     WEBHOOK_URL = os.getenv('WEBHOOK_URL')
-    WEBHOOK_PATH = f"/bot/{TELEGRAM_BOT_TOKEN}" if TELEGRAM_BOT_TOKEN else None
+    WEBHOOK_PATH = None  # Will be set after validation
     
     # Admin Settings
     ADMIN_USER_ID = int(os.getenv('ADMIN_USER_ID', 0))
@@ -36,3 +36,6 @@ class Config:
             raise ValueError("WEBHOOK_URL is required")
         if not cls.ADMIN_USER_ID:
             raise ValueError("ADMIN_USER_ID is required")
+        
+        # Set webhook path after validation
+        cls.WEBHOOK_PATH = f"/bot/{cls.TELEGRAM_BOT_TOKEN}"
