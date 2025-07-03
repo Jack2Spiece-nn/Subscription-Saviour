@@ -1,7 +1,7 @@
 import logging
 import asyncio
 from flask import Flask, request, Response
-from telegram import Update
+from telegram import Update, Bot
 from app.config import Config
 from app.bot_handlers import bot_instance
 from app.database import init_db
@@ -17,6 +17,9 @@ app.config['SECRET_KEY'] = Config.SECRET_KEY
 # Initialize database
 init_db()
 
+# Create Bot instance for webhook processing
+bot = Bot(token=Config.TELEGRAM_BOT_TOKEN)
+
 @app.route('/', methods=['GET'])
 def health_check():
     """Health check endpoint"""
@@ -28,17 +31,20 @@ def telegram_webhook():
     try:
         # Get update from request
         update_data = request.get_json()
+        logger.info(f"Received webhook update: {update_data}")
         
         if not update_data:
             logger.warning("Received empty update")
             return Response(status=200)
         
         # Create Update object
-        update = Update.de_json(update_data, Config.TELEGRAM_BOT_TOKEN)
+        update = Update.de_json(update_data, bot)
         
         if not update:
             logger.warning("Failed to parse update")
             return Response(status=200)
+        
+        logger.info(f"Processing update for user: {update.effective_user.id if update.effective_user else 'unknown'}")
         
         # Process update asynchronously
         loop = asyncio.new_event_loop()
@@ -48,15 +54,16 @@ def telegram_webhook():
             # Get the application and process the update
             application = bot_instance.get_application()
             loop.run_until_complete(application.process_update(update))
+            logger.info("Update processed successfully")
         except Exception as e:
-            logger.error(f"Error processing update: {str(e)}")
+            logger.error(f"Error processing update: {str(e)}", exc_info=True)
         finally:
             loop.close()
         
         return Response(status=200)
         
     except Exception as e:
-        logger.error(f"Error in webhook handler: {str(e)}")
+        logger.error(f"Error in webhook handler: {str(e)}", exc_info=True)
         return Response(status=500)
 
 @app.route('/set_webhook', methods=['POST'])
