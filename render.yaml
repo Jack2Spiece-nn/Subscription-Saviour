@@ -1,0 +1,72 @@
+services:
+  # Main web service (webhook handler)
+  - type: web
+    name: subscription-savor-bot
+    env: python
+    region: oregon
+    plan: starter
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python main.py"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.9.18
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: WEBHOOK_URL
+        sync: false
+      - key: ADMIN_USER_ID
+        sync: false
+      - key: DATABASE_URL
+        fromDatabase:
+          name: subscription-savor-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: subscription-savor-redis
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: PRO_PLAN_PRICE
+        value: "$4.99/month"
+    
+  # Background worker service
+  - type: worker
+    name: subscription-savor-worker
+    env: python
+    region: oregon
+    plan: starter
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python worker.py"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.9.18
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: WEBHOOK_URL
+        sync: false
+      - key: ADMIN_USER_ID
+        sync: false
+      - key: DATABASE_URL
+        fromDatabase:
+          name: subscription-savor-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: subscription-savor-redis
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+
+databases:
+  - name: subscription-savor-db
+    plan: starter
+    databaseName: subscription_savor
+    user: subscription_user
+    region: oregon
+
+  - type: redis
+    name: subscription-savor-redis
+    plan: starter
+    region: oregon
